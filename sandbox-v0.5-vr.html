@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Sandbox v0.5 VR</title>
+<style>
+*{box-sizing:border-box}body{margin:0;overflow:hidden;background:#87ceeb;font-family:Arial;touch-action:none}canvas{display:block}#hud{position:fixed;top:12px;left:12px;color:white;text-shadow:1px 2px 3px #000;font-weight:bold}#stick{position:fixed;bottom:35px;left:28px;width:125px;height:125px;border-radius:50%;background:#ffffff40;border:2px solid #ffffff88;touch-action:none}#nub{position:absolute;left:39px;top:39px;width:43px;height:43px;border-radius:50%;background:#ffffffa0}#jump{position:fixed;right:25px;bottom:45px;width:85px;height:85px;border-radius:50%;border:2px solid white;background:#ffffff55;color:white;font-weight:bold}#aim{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);color:white;font-size:24px;pointer-events:none}
+#tools{position:fixed;right:12px;top:12px;display:flex;flex-direction:column;gap:8px}#tools{max-height:55vh;overflow-y:auto}#tools button{background:#263746cc;color:white;border:1px solid white;border-radius:10px;padding:12px;font-weight:bold}
+#vrButton{position:fixed!important;bottom:150px!important;right:12px!important;left:auto!important;transform:none!important;font-size:13px!important;padding:12px!important;z-index:20!important}#collection{position:fixed;left:10px;top:52px;max-width:55vw;max-height:42vh;overflow:auto;background:#14212cdd;color:white;border-radius:10px;padding:10px;display:none;font-size:13px}#notice{position:fixed;top:15%;left:50%;transform:translateX(-50%);color:#ffe45c;font-weight:bold;text-shadow:1px 2px 4px black;pointer-events:none;text-align:center} </style>
+</head><body>
+<div id="hud">SANDBOX v0.5 VR</div><div id="aim">+</div><div id="stick"><div id="nub"></div></div><button id="jump">JUMP</button>
+<div id="collection"></div><div id="notice"></div><div id="tools"><button id="animal">+ ANIMAL 🐾</button><button id="cube">+ CUBE</button><button id="ball">+ BALL</button><button id="clear">CLEAR</button><button id="save">💾 SAVE</button><button id="collectionBtn">🏆 COLLECTION</button><button id="export">EXPORT SAVE</button><button id="import">IMPORT SAVE</button></div>
+<script type="module">
+import * as THREE from 'https://esm.sh/three@0.170.0';
+import {VRButton} from 'https://esm.sh/three@0.170.0/addons/webxr/VRButton.js';
+const scene=new THREE.Scene();scene.background=new THREE.Color(0x87ceeb);
+const camera=new THREE.PerspectiveCamera(75,innerWidth/innerHeight,.1,500);camera.rotation.order='YXZ';camera.position.set(0,1.7,6);
+const renderer=new THREE.WebGLRenderer({antialias:false});renderer.setSize(innerWidth,innerHeight);renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));document.body.appendChild(renderer.domElement);
+renderer.xr.enabled=true;
+const vrRig=new THREE.Group();scene.add(vrRig);
+const vrButton=VRButton.createButton(renderer);vrButton.id="vrButton";document.body.appendChild(vrButton);
+const vrControllers=[renderer.xr.getController(0),renderer.xr.getController(1)];vrControllers.forEach(c=>vrRig.add(c));
+let vrActive=false;const lastButtons={};
+renderer.xr.addEventListener("sessionstart",()=>{vrActive=true;vrRig.position.set(camera.position.x,0,camera.position.z);camera.position.set(0,0,0);camera.rotation.set(0,0,0);document.querySelectorAll("#stick,#jump,#tools,#aim").forEach(el=>el.style.display="none")});
+renderer.xr.addEventListener("sessionend",()=>{vrActive=false;camera.position.set(vrRig.position.x,1.7,vrRig.position.z);vrRig.position.set(0,0,0);document.querySelectorAll("#stick,#jump,#tools,#aim").forEach(el=>el.style.display="");});
+scene.add(new THREE.HemisphereLight(0xffffff,0x555555,2));
+const floor=new THREE.Mesh(new THREE.PlaneGeometry(200,200),new THREE.MeshLambertMaterial({color:0x55aa55}));floor.rotation.x=-Math.PI/2;scene.add(floor);
+const cubeGeo=new THREE.BoxGeometry(2,2,2);
+for(let i=0;i<22;i++){const c=new THREE.Mesh(cubeGeo,new THREE.MeshLambertMaterial({color:new THREE.Color().setHSL(i/22,.7,.55)}));c.position.set(Math.sin(i*2.4)*18,1,Math.cos(i*2.4)*18);scene.add(c)}
+const objects=[];const ballGeo=new THREE.SphereGeometry(.65,12,8);const smallCubeGeo=new THREE.BoxGeometry(1.2,1.2,1.2);
+function spawn(type){if(objects.length>=70){const old=objects.shift();scene.remove(old.mesh)}const mesh=new THREE.Mesh(type==='ball'?ballGeo:smallCubeGeo,new THREE.MeshLambertMaterial({color:Math.random()*0xffffff}));const direction=new THREE.Vector3();camera.getWorldDirection(direction);mesh.position.copy(camera.position).addScaledVector(direction,3);mesh.position.y=Math.max(mesh.position.y,2);scene.add(mesh);objects.push({mesh,vy:0,r:type==='ball'?.65:.6});}
+document.getElementById('cube').onclick=()=>spawn('cube');document.getElementById('ball').onclick=()=>spawn('ball');document.getElementById('clear').onclick=()=>{for(const o of objects)scene.remove(o.mesh);objects.length=0};
+
+// Low-poly wildlife; each spawn independently rolls 1 in 512.
+const animals=[];const SAVEKEY="sandbox-wildlife-v04";let collection={};
+const species=['cow','pig','sheep','chicken'];
+const palettes={cow:[0x8b5a36,0xffd34e],pig:[0xf4a4b7,0xa765e8],sheep:[0xf2f0df,0x202936],chicken:[0xf9f5e8,0x4cafff]};
+function part(group,w,h,d,color,x,y,z){const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),new THREE.MeshLambertMaterial({color}));m.position.set(x,y,z);group.add(m);return m}
+function makeAnimal(kind,shiny){
+ const g=new THREE.Group(),color=palettes[kind][shiny?1:0];
+ const small=kind==='chicken',size=small?.65:1;
+ const body=part(g,1.25*size,.8*size,1.8*size,color,0,1.0*size,0);
+ part(g,.8*size,.7*size,.65*size,color,0,1.35*size,-1.05*size);
+ const legs=[];
+ for(const x of [-.4,.4])for(const z of [-.55,.55]){const leg=part(g,.22*size,.65*size,.24*size,kind==='chicken'?0xd99b31:color,x,.4*size,z);legs.push(leg)}
+ for(const x of [-.22,.22])part(g,.12*size,.12*size,.08*size,0x151515,x,1.47*size,-1.4*size);
+ if(kind==='cow'){part(g,.7*size,.32*size,.15*size,shiny?0xfff5b0:0xf4c3bc,0,1.18*size,-1.43*size);part(g,.45*size,.12*size,.65*size,0xf5f2eb,-.25*size,1.42*size,.12*size)}
+ if(kind==='pig')part(g,.46*size,.3*size,.18*size,shiny?0xd4a3ff:0xffc1c7,0,1.2*size,-1.47*size);
+ if(kind==='sheep'){for(const z of [-.55,0,.55])part(g,1.35*size,.23*size,.5*size,shiny?0x40d5df:0xffffff,0,1.45*size,z)}
+ if(kind==='chicken'){part(g,.22,.3,.25,0xe44737,0,1.35*size,-1.05*size);part(g,.4,.2,.25,0xe7b032,0,1.12*size,-1.5*size)}
+ return {mesh:g,legs,kind,shiny,name:"",phase:Math.random()*6.28,heading:Math.random()*6.28,turnTimer:0,speed:small?.6:1};
+}
+let spawnCount=0,shinyCount=0;
+function spawnAnimal(){
+ if(animals.length>=35){const old=animals.shift();scene.remove(old.mesh)}
+ const kind=species[Math.floor(Math.random()*species.length)],shiny=Math.floor(Math.random()*512)===0;
+ const a=makeAnimal(kind,shiny),dir=new THREE.Vector3();camera.getWorldDirection(dir);dir.y=0;dir.normalize();
+ a.mesh.position.copy(camera.position).addScaledVector(dir,5);a.mesh.position.y=0;
+ scene.add(a.mesh);animals.push(a);spawnCount++;if(shiny){shinyCount++;collection[kind]=(collection[kind]||0)+1;} saveGame();
+ const notice=document.getElementById('notice');notice.textContent=shiny?'✨ RARE SHINY '+kind.toUpperCase()+'! ✨':kind.toUpperCase()+' spawned';
+ updateHud();
+ clearTimeout(window.noticeTimer);window.noticeTimer=setTimeout(()=>notice.textContent='',2300);
+}
+document.getElementById('animal').onclick=spawnAnimal;
+function saveGame(){try{localStorage.setItem(SAVEKEY,JSON.stringify({animals:animals.map(a=>({kind:a.kind,shiny:a.shiny,name:a.name,x:a.mesh.position.x,z:a.mesh.position.z,heading:a.heading})),collection,spawnCount,shinyCount}));}catch(e){document.getElementById("notice").textContent="Save failed: storage unavailable"}}
+function loadGame(data){if(!data||!Array.isArray(data.animals))return;for(const a of animals)scene.remove(a.mesh);animals.length=0;collection=data.collection||{};spawnCount=data.spawnCount||0;shinyCount=data.shinyCount||0;for(const record of data.animals.slice(-35)){if(!species.includes(record.kind))continue;const a=makeAnimal(record.kind,!!record.shiny);a.name=String(record.name||"").slice(0,32);a.heading=Number(record.heading)||0;a.mesh.position.set(Number(record.x)||0,0,Number(record.z)||0);scene.add(a.mesh);animals.push(a)}updateHud()}
+function updateHud(){document.getElementById("hud").textContent=`SANDBOX v0.5 VR | Animals: ${animals.length} | Shinies: ${shinyCount}`}
+try{const saved=localStorage.getItem(SAVEKEY);if(saved)loadGame(JSON.parse(saved))}catch(e){}
+document.getElementById("save").onclick=()=>{saveGame();document.getElementById("notice").textContent="Game saved!"};
+document.getElementById("collectionBtn").onclick=()=>{const el=document.getElementById("collection");el.style.display=el.style.display==="block"?"none":"block";el.textContent="🏆 Shiny collection: "+(Object.entries(collection).map(([k,v])=>`${k}: ${v}`).join(" | ")||"None yet")+" | Fred 💜: First shiny pig (commemorative record)"};
+document.getElementById("export").onclick=()=>{saveGame();const blob=new Blob([localStorage.getItem(SAVEKEY)||"{}"],{type:"application/json"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download="sandbox-save.json";a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)};
+document.getElementById("import").onclick=()=>{const input=document.createElement("input");input.type="file";input.accept=".json,application/json";input.onchange=async()=>{try{loadGame(JSON.parse(await input.files[0].text()));saveGame();alert("Save imported!")}catch(e){alert("Invalid save file")}};input.click()};
+setInterval(saveGame,5000);window.addEventListener("pagehide",saveGame);
+function updateAnimals(dt){for(const a of animals){a.turnTimer-=dt;if(a.turnTimer<=0){a.heading+=(Math.random()-.5)*1.8;a.turnTimer=1+Math.random()*3}a.mesh.rotation.y=a.heading;const step=a.speed*dt;a.mesh.position.x-=Math.sin(a.heading)*step;a.mesh.position.z-=Math.cos(a.heading)*step;a.mesh.position.x=THREE.MathUtils.clamp(a.mesh.position.x,-90,90);a.mesh.position.z=THREE.MathUtils.clamp(a.mesh.position.z,-90,90);a.phase+=dt*7;for(let i=0;i<a.legs.length;i++)a.legs[i].rotation.x=Math.sin(a.phase+(i%2===0?0:Math.PI))*.35}}
+
+let yaw=0,pitch=0,moveX=0,moveY=0,vertical=0;const keys={};
+window.addEventListener('keydown',e=>{keys[e.key.toLowerCase()]=true});window.addEventListener('keyup',e=>{keys[e.key.toLowerCase()]=false});
+const stick=document.getElementById('stick'),nub=document.getElementById('nub');
+function stickMove(e){const r=stick.getBoundingClientRect(),dx=e.clientX-(r.left+r.width/2),dy=e.clientY-(r.top+r.height/2),len=Math.max(1,Math.hypot(dx,dy)),dist=Math.min(42,len);moveX=dx/len*dist/42;moveY=dy/len*dist/42;nub.style.transform=`translate(${moveX*42}px,${moveY*42}px)`}
+stick.addEventListener('pointerdown',e=>{stick.setPointerCapture(e.pointerId);stickMove(e)});stick.addEventListener('pointermove',e=>{if(stick.hasPointerCapture(e.pointerId))stickMove(e)});function reset(){moveX=moveY=0;nub.style.transform='translate(0,0)'}stick.addEventListener('pointerup',reset);stick.addEventListener('pointercancel',reset);
+let lookId=null,lastX=0,lastY=0;renderer.domElement.addEventListener('pointerdown',e=>{if(lookId!==null)return;lookId=e.pointerId;lastX=e.clientX;lastY=e.clientY;renderer.domElement.setPointerCapture(e.pointerId)});renderer.domElement.addEventListener('pointermove',e=>{if(e.pointerId!==lookId)return;yaw-=(e.clientX-lastX)*.004;pitch-=(e.clientY-lastY)*.004;pitch=THREE.MathUtils.clamp(pitch,-1.5,1.5);lastX=e.clientX;lastY=e.clientY});function stopLook(e){if(e.pointerId===lookId)lookId=null}renderer.domElement.addEventListener('pointerup',stopLook);renderer.domElement.addEventListener('pointercancel',stopLook);
+function jump(){if(camera.position.y<=1.701)vertical=5}document.getElementById('jump').addEventListener('pointerdown',jump);
+function vrInput(dt){
+ const session=renderer.xr.getSession();if(!session)return;
+ const sources=[...session.inputSources].filter(s=>s.gamepad);
+ const left=sources.find(s=>s.handedness==='left');
+ if(left){const axes=left.gamepad.axes;let x=axes.length>=4?axes[2]:axes[0],y=axes.length>=4?axes[3]:axes[1];
+ if(Math.abs(x)<.18)x=0;if(Math.abs(y)<.18)y=0;
+ const facing=new THREE.Vector3();camera.getWorldDirection(facing);facing.y=0;facing.normalize();
+ const right=new THREE.Vector3(-facing.z,0,facing.x);
+ vrRig.position.addScaledVector(right,x*3*dt);vrRig.position.addScaledVector(facing,-y*3*dt);
+ }
+ // No right-stick turning: safe for drifting controllers.
+ for(const source of sources){const buttons=source.gamepad.buttons;const hand=source.handedness;
+ const buttonIndex=hand==='right'?4:4;const pressed=!!buttons[buttonIndex]?.pressed;
+ if(pressed&&!lastButtons[hand]){if(hand==='right')spawnAnimal();else spawn('cube')}
+ lastButtons[hand]=pressed;
+ }
+}
+let prev=performance.now();function loop(now){const dt=Math.min((now-prev)/1000,.05);prev=now;if(vrActive){vrInput(dt);for(const o of objects){o.vy-=13*dt;o.mesh.position.y+=o.vy*dt;if(o.mesh.position.y<o.r){o.mesh.position.y=o.r;o.vy=Math.abs(o.vy)<.6?0:-o.vy*.45}}updateAnimals(dt);renderer.render(scene,camera);return;}const side=moveX+(keys.d?1:0)-(keys.a?1:0),forward=-moveY+(keys.w?1:0)-(keys.s?1:0);const length=Math.max(1,Math.hypot(side,forward));const speed=6*dt/length;camera.position.x+=(Math.cos(yaw)*side-Math.sin(yaw)*forward)*speed;camera.position.z+=(-Math.sin(yaw)*side-Math.cos(yaw)*forward)*speed;vertical-=13*dt;camera.position.y+=vertical*dt;if(camera.position.y<1.7){camera.position.y=1.7;vertical=0}if(keys[' ']){keys[' ']=false;jump()}camera.rotation.y=yaw;camera.rotation.x=pitch;for(const o of objects){o.vy-=13*dt;o.mesh.position.y+=o.vy*dt;if(o.mesh.position.y<o.r){o.mesh.position.y=o.r;o.vy=Math.abs(o.vy)<.6?0:-o.vy*.45}o.mesh.rotation.x+=dt*.4;o.mesh.rotation.z+=dt*.25}updateAnimals(dt);renderer.render(scene,camera)}renderer.setAnimationLoop(loop);
+window.addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
+</script></body></html>
